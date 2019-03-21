@@ -1,0 +1,229 @@
+#!/usr/bin/env python
+# _*_ coding = utf-8 _*_
+# Author:Tom
+import os
+import sys
+import imp
+import pdb
+import requests
+import re
+import openpyxl as opl
+import time
+import random
+import json
+from multiprocessing import process
+from requests.exceptions import RequestException
+import urllib.error
+imp.reload(sys)
+sys.getdefaultencoding()
+
+'''网页html爬取模块'''
+class text_spider(object):
+    def __init__(self,url,proxies):
+        self.url = url
+        self.proxies = proxies
+        self.timeout = 2
+        self.headers = {'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
+                   (KHTML, like Gecko) Chrome/71.0.3578.98 Safari/537.36'}
+    def request_html(self):
+        try:
+            req= requests.get(self.url,headers = self.headers,timeout = self.timeout,proxies = self.proxies)
+            if req.status_code == 200:
+                return req.text
+            else:
+                return None
+        except(RequestException,AttributeError,urllib.error.URLError):
+            return None
+
+'''正则提取模块'''
+class html_text_regx(object):
+    # 初始化文本获取变量
+    def __init__(self,html_text):
+        self.html_text = html_text
+        self.pattern_0 = re.compile(r"""(
+        \w{1}\s{1}href\S{6}(\d+)">                    # 页数最大值获取
+        )""",re.VERBOSE|re.S)
+        self.pattern_1 = re.compile(r"""(
+        <img\s{1}\S+\s{1}alt="(\w{2})"\s{1}/>         # 国家获取
+        .*?(\d+\.\d+\.\d+\.\d+)                       # ip地址获取
+        .*?<td>(\d+)</td>                             # 端口获取
+        .*?<td>.*?([\u4e00-\u9fa5]{1,8}).*?</td>.*?   # 地区获取
+        .*?<td>(\w{4,5}|\w{5}\d{1}/\d{1})</td>        # http协议类型获取
+        .*?title="(\d+\.\d+)[\u4e00-\u9fa5]*"         # 连接速度获取
+        .*?title="(\d+\.\d+)[\u4e00-\u9fa5]*"         # 连接时间获取
+        .*?<td>(\d+[\u4e00-\u9fa5]+)</td>             # 存活时间获取
+        .*?(\d{2}-\d{2}-\d{2}\s{1}\d{2}:\d{2})        # 验证时间获取
+            )""",re.VERBOSE|re.S)
+    # 获取页码最大值正则表达式模块
+    def regular_exp_page_max_num(self):
+        try:
+            items_0 =re.findall(self.pattern_0,self.html_text)
+            return  items_0[-1][-1]
+        except TypeError:
+            return "此代理/地址无法连接网页请删除"
+    # 获取ip信息正则表达式模块
+    def regular_exp_ip_information(self):
+        try:
+            items_list = []
+            items_1 = re.findall(self.pattern_1,self.html_text)
+            items_m = (l for l in items_1)
+            for item in items_m:
+                item_list_0 = list(item)
+                del(item_list_0[0])
+                items_list.append(item_list_0)
+            return items_list
+        except TypeError:
+            return "此代理/地址无法连接网页请删除"
+
+        
+class excel_writer_reader(object):
+    def __init__(self,sheet_recieve,Ips_Pool_items,excel_writer_row_number,Ips_Pool_items_length):
+        self.sheet_recieve = sheet_recieve
+        self.Ips_Pool_items = Ips_Pool_items
+        self.excel_writer_row_number = excel_writer_row_number
+        self.Ips_Pool_items_length = Ips_Pool_items_length
+    # excel工作sheet写入
+    def excel_writer(self):
+            items_index = 0
+            for num in range(self.excel_writer_row_number,self.excel_writer_row_number + self.Ips_Pool_items_length):
+                ip_index = 0
+                for word in range(ord("A"),ord("I")+1):
+                    self.sheet_recieve[chr(word)+str(num)] = self.Ips_Pool_items[items_index][ip_index]
+                    ip_index += 1
+                items_index += 1  
+            
+
+# 付费代理地址加载模块
+class proxies_get(object):
+    def __init__(self,API):
+        self.API = API
+        self.headers = {'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
+                   (KHTML, like Gecko) Chrome/71.0.3578.98 Safari/537.36'}
+        self.timeout = 3
+    def proxies_initial_pick(self):
+        response = requests.get(url = self.API,headers = self.headers,timeout = self.timeout)
+        print(response)
+        json_data = json.loads(response.text)
+        if json_data["RESULT"] == "订单号已失效！":
+            print(json_data["RESULT"])
+            return None
+        elif isinstance(json_data["RESULT"],str):
+            print(json_data["RESULT"])
+            return True
+        else:
+            return json_data["RESULT"]
+#     with open(r"C:\Users\tom\Desktop\11.txt","r") as f:
+#         Ipstring = f.read()
+#         
+#         pattern = re.compile(r".*?port.*?(\d{4,5}).*?ip.*?(\d+.\d+.\d+.\d+).*?",re.S)
+#         items = re.findall(pattern,Ipstring)
+#         return items
+def page_max_get(url,API):
+    times = 1
+    while times <= 3:
+        ip_port_list = proxies_get(API).proxies_initial_pick()
+        if isinstance(ip_port_list,type(None)):  # 返回None意味着没有成功调用接口
+            print('订单已失效，请重新购买！')
+            break
+        elif isinstance(ip_port_list,type(True)):
+            print("正在重新调取")
+            time.sleep(5)
+        else:
+            for ip in ip_port_list:
+                proxies = {
+                    "http":"http://" + ip["ip"]+ ":" + ip["port"],
+                    "https":"https://" + ip["ip"]+ ":" + ip["port"]
+                }
+                html_text = text_spider(url,proxies).request_html()
+                if isinstance(html_text,str):
+                    page_max = html_text_regx(html_text).regular_exp_page_max_num()
+                    return int(page_max)
+                else:
+                    times += 1
+    return "请检查代理是否可用"
+
+# 创建新excel工作簿
+def excel_creater():
+#     pdb.set_trace()
+    value = os.path.exists(r'E:\python_project_dir\random\ip代理池.xlsx')
+    if value:
+        return True
+    else:
+        excel_file_creater = opl.Workbook()  # 创建工作簿
+        sheet_file_creater_0 = excel_file_creater.create_sheet(u'nn', index=0)  # 创建第一个工作表
+        sheet_file_creater_0.append(['国家','ip地址','端口','地区','http协议类型',
+                                  '速度/s','连接时间/s','存活时间','验证时间'])
+        sheet_file_creater_1 = excel_file_creater.create_sheet(u'nt', index=1)  # 创建第二个工作表
+        sheet_file_creater_1.append(['国家','ip地址','端口','地区','http协议类型',
+                                  '速度/s','连接时间/s','存活时间','验证时间'])
+        excel_file_creater.save(r'E:\python_project_dir\random\ip代理池.xlsx')
+        return None
+        
+
+        
+if __name__ == "__main__":
+    API = api  # 你的付费代理api，同个地址顶多爬个十几页就被关了，没办法没钱，所以我不会放上我的付费代理给你用的嘿嘿
+    url_base = 'https://www.xicidaili.com/' # 目标地址url基础构成
+    IPTYPE = ["nn","nt"]             # 爬取的IP种类
+    Ips_Pool_address_column = 2      # 地址列
+    Ips_Pool_port_column = 3         # 端口列
+    Ips_Pool_http_type_column = 5    # http协议种类列
+    Ips_Pool_row_initial = 2         # 每个ip种类表都从第二行开始写入
+    times = 1                        # 正常爬取,付费代理地址调用次数
+    
+    if excel_creater():
+        print("文件存在请修改或者移动")
+    else:
+        T1 = time.time()
+        excel_file_write = opl.load_workbook(r'E:\python_project_dir\random\ip代理池.xlsx') # 载入xlsx文件
+        for iptype in IPTYPE:
+            page = 1
+            excel_writer_row_number = 2      # 有标题行，所以从第2行开始取数
+            url = url_base + iptype + '/' +str(page)
+            page_max = page_max_get(url,API)
+            if isinstance(page_max,int):
+                print("%s 的最大页数是 %s" % (iptype,page_max))  # 显示当前ip种类最大页数值
+                while times <= 300:    # 正常调用付费AIP的次数限制
+                    if page > page_max:
+                        break
+                    else:
+                        ip_port_list = proxies_get(API).proxies_initial_pick()
+                        if isinstance(ip_port_list,type(None)):  # 返回None意味着没有成功调用接口
+                            print('订单已失效，请重新购买！')
+                            break
+                        elif isinstance(ip_port_list,type(True)):
+                            print("正在重新调取")
+                            time.sleep(5)
+                        else:
+                            for ip in ip_port_list:
+                                if page > page_max:
+                                    print("已经完成IP种类%s的爬取" % (iptype))
+                                    break
+                                else:
+                                    proxies = {
+                                        "http":"http://" + ip["ip"]+ ":" + ip["port"],
+                                        "https":"https://" + ip["ip"]+ ":" + ip["port"]
+                                        }
+                                    while page <= int(page_max):
+                                        print('正在爬取 %s Ip地址（nn表示高匿地址,nt表示普通地址）第 %d 页'
+                                              %(iptype,page))
+                                        url = url_base + iptype + '/' +str(page)
+                                        html_text = text_spider(url,proxies).request_html()
+                                        if isinstance(text_spider(url,proxies).request_html(),str):
+                                            sheet_recieve = excel_file_write[iptype]  # 根据爬取的ip种类激活响应的表格等待数据输入
+                                            Ips_Pool_items = html_text_regx(html_text).regular_exp_ip_information() # ip池信息提取
+                                            Ips_Pool_items_length = len(Ips_Pool_items)       # ip池信息列表长度
+                                            excel_operator = excel_writer_reader(sheet_recieve,Ips_Pool_items,
+                                            excel_writer_row_number,Ips_Pool_items_length)  # 写入excel
+                                            excel_operator.excel_writer()
+                                            excel_writer_row_number += Ips_Pool_items_length  # 下一次excel开始写入的行数
+                                            page += 1     # 爬取成功翻到下一页45
+                                        else:
+                                            print("代理(%s)已经被封禁" % (ip))
+                                            break
+                    times += 1
+
+            else:
+                print(page_max)
+            excel_file_write.save(r'E:\python_project_dir\random\ip代理池.xlsx')
+        print(time.time() - T1)
